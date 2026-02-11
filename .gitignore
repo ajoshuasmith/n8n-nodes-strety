@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Cache
+.npm-cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Source maps
+*.js.map
+
+# Package tarballs
+*.tgz
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+
+# Claude Code
+.claude/
+
+# Lock files (use npm install to generate)
+pnpm-lock.yaml
+
+# Original assets
+strety.webp
+
+# OpenAPI spec (development reference only)
+openapi*
