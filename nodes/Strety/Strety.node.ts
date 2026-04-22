@@ -916,6 +916,27 @@ async function handlePeople(
 	} as JsonObject);
 }
 
+/**
+ * Compose the nested `renewal_scheduler` object from the two flat UI
+ * fields (`renewal_interval`, `renewal_day_of_month`) the node exposes,
+ * since fixedCollections are awkward for a single-object field. Mutates
+ * `attributes` in place.
+ */
+function composeRenewalScheduler(attributes: IDataObject): void {
+	const interval = attributes.renewal_interval as number | undefined;
+	const dayOfMonth = attributes.renewal_day_of_month as number | undefined;
+
+	if (interval !== undefined || dayOfMonth !== undefined) {
+		const scheduler: IDataObject = {};
+		if (interval !== undefined) scheduler.interval = interval;
+		if (dayOfMonth !== undefined) scheduler.day_of_month = dayOfMonth;
+		attributes.renewal_scheduler = scheduler;
+	}
+
+	delete attributes.renewal_interval;
+	delete attributes.renewal_day_of_month;
+}
+
 async function handlePlaybook(
 	this: IExecuteFunctions,
 	operation: string,
@@ -941,13 +962,16 @@ async function handlePlaybook(
 			space_type: spaceType,
 			...additionalFields,
 		};
+		composeRenewalScheduler(attributes);
 		return handleCreate.call(this, '/api/v1/playbooks', 'playbook', attributes);
 	}
 
 	if (operation === 'update') {
 		const id = this.getNodeParameter('playbookId', i) as string;
 		const updateFields = this.getNodeParameter('updateFields', i, {}) as IDataObject;
-		return handleUpdate.call(this, `/api/v1/playbooks/${id}`, 'playbook', updateFields);
+		const attributes: IDataObject = { ...updateFields };
+		composeRenewalScheduler(attributes);
+		return handleUpdate.call(this, `/api/v1/playbooks/${id}`, 'playbook', attributes);
 	}
 
 	if (operation === 'delete') {
@@ -985,7 +1009,12 @@ async function handlePlaybookFolder(
 			space_type: spaceType,
 			...additionalFields,
 		};
-		return handleCreate.call(this, '/api/v1/playbooks/folders', 'playbook_folder', attributes);
+		return handleCreate.call(
+			this,
+			'/api/v1/playbooks/folders',
+			'playbook_folder',
+			attributes,
+		);
 	}
 
 	if (operation === 'update') {

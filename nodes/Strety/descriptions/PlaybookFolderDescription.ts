@@ -188,6 +188,35 @@ export const playbookFolderFields: INodeProperties[] = [
 		},
 		description: 'The type of the owning resource',
 	},
+	{
+		displayName: 'Additional Fields',
+		name: 'additionalFields',
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		displayOptions: {
+			show: {
+				resource: ['playbookFolder'],
+				operation: ['create'],
+			},
+		},
+		options: [
+			{
+				displayName: 'Description',
+				name: 'description',
+				type: 'string',
+				default: '',
+				description: 'Detailed description of the playbook folder',
+			},
+			{
+				displayName: 'Parent Folder ID',
+				name: 'parent_id',
+				type: 'string',
+				default: '',
+				description: 'The UUID of the parent folder, if this is a subfolder',
+			},
+		],
+	},
 
 	// ----------------------------------
 	//         playbookFolder: update
@@ -205,6 +234,20 @@ export const playbookFolderFields: INodeProperties[] = [
 			},
 		},
 		options: [
+			{
+				displayName: 'Description',
+				name: 'description',
+				type: 'string',
+				default: '',
+				description: 'Detailed description of the playbook folder',
+			},
+			{
+				displayName: 'Parent Folder ID',
+				name: 'parent_id',
+				type: 'string',
+				default: '',
+				description: 'Move into this parent folder (UUID), or empty string to move to root',
+			},
 			{
 				displayName: 'Space ID',
 				name: 'space_id',

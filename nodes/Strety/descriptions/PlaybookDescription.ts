@@ -230,6 +230,20 @@ export const playbookFields: INodeProperties[] = [
 				description: 'Detailed description of the playbook',
 			},
 			{
+				displayName: 'Folder ID',
+				name: 'folder_id',
+				type: 'string',
+				default: '',
+				description: 'The UUID of the folder that will contain this playbook',
+			},
+			{
+				displayName: 'Owner ID',
+				name: 'owner_id',
+				type: 'string',
+				default: '',
+				description: 'The UUID of the person who owns the playbook',
+			},
+			{
 				displayName: 'Playbook Type',
 				name: 'type',
 				type: 'options',
@@ -240,6 +254,31 @@ export const playbookFields: INodeProperties[] = [
 					{ name: 'Upload', value: 'upload' },
 				],
 				description: 'The type of playbook (document requires content, link requires URL)',
+			},
+			{
+				displayName: 'Renewal Interval',
+				name: 'renewal_interval',
+				type: 'options',
+				default: 12,
+				options: [
+					{ name: '3 Months', value: 3 },
+					{ name: '6 Months', value: 6 },
+					{ name: '12 Months', value: 12 },
+				],
+				description:
+					'How often the playbook should renew. Set together with Renewal Day of Month.',
+			},
+			{
+				displayName: 'Renewal Day of Month',
+				name: 'renewal_day_of_month',
+				type: 'number',
+				default: 1,
+				typeOptions: {
+					minValue: -1,
+					maxValue: 28,
+				},
+				description:
+					'Day of month when the playbook renews (1-28, or -1 for last day). Required when Renewal Interval is set.',
 			},
 			{
 				displayName: 'Service',
@@ -306,6 +345,45 @@ export const playbookFields: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				description: 'Detailed description of the playbook',
+			},
+			{
+				displayName: 'Folder ID',
+				name: 'folder_id',
+				type: 'string',
+				default: '',
+				description: 'Move the playbook into this folder (UUID)',
+			},
+			{
+				displayName: 'Owner ID',
+				name: 'owner_id',
+				type: 'string',
+				default: '',
+				description: 'Reassign the playbook to this person (UUID)',
+			},
+			{
+				displayName: 'Renewal Interval',
+				name: 'renewal_interval',
+				type: 'options',
+				default: 12,
+				options: [
+					{ name: '3 Months', value: 3 },
+					{ name: '6 Months', value: 6 },
+					{ name: '12 Months', value: 12 },
+				],
+				description:
+					'How often the playbook should renew. Set together with Renewal Day of Month.',
+			},
+			{
+				displayName: 'Renewal Day of Month',
+				name: 'renewal_day_of_month',
+				type: 'number',
+				default: 1,
+				typeOptions: {
+					minValue: -1,
+					maxValue: 28,
+				},
+				description:
+					'Day of month when the playbook renews (1-28, or -1 for last day). Required when Renewal Interval is set.',
 			},
 			{
 				displayName: 'Service',
