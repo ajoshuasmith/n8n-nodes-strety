@@ -37,6 +37,14 @@ This node supports the following resources and operations:
 - **Update** - Update a check-in
 - **Delete** - Delete a check-in
 
+### Goal Milestone
+
+- **Get Many** - Get milestones for a goal
+- **Get** - Get a single milestone
+- **Create** - Create a milestone for a goal
+- **Update** - Update a milestone
+- **Delete** - Delete a milestone
+
 ### Headline
 
 - **Get Many** - Get multiple headlines
@@ -106,6 +114,17 @@ This node supports the following resources and operations:
 
 - **Get Many** - Get multiple projects
 - **Get** - Get a single project
+- **Create** - Create a new project
+
+### Roles Chart
+
+- **Get Many** - Get multiple roles charts
+- **Get** - Get a single roles chart
+
+### Role
+
+- **Get Many** - Get roles for a roles chart
+- **Get** - Get a single role
 
 ### Team
 
@@ -119,6 +138,11 @@ This node supports the following resources and operations:
 - **Create** - Create a new todo
 - **Update** - Update a todo
 - **Delete** - Delete a todo
+
+### Vision
+
+- **Get Many** - Get multiple visions
+- **Get** - Get a single vision
 
 ## Credentials
 

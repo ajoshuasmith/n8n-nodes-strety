@@ -12,6 +12,10 @@ import { NodeApiError } from 'n8n-workflow';
 
 import { goalOperations, goalFields } from './descriptions/GoalDescription';
 import { goalCheckInOperations, goalCheckInFields } from './descriptions/GoalCheckInDescription';
+import {
+	goalMilestoneOperations,
+	goalMilestoneFields,
+} from './descriptions/GoalMilestoneDescription';
 import { headlineOperations, headlineFields } from './descriptions/HeadlineDescription';
 import { issueOperations, issueFields } from './descriptions/IssueDescription';
 import { meetingOperations, meetingFields } from './descriptions/MeetingDescription';
@@ -28,8 +32,11 @@ import {
 	playbookFolderFields,
 } from './descriptions/PlaybookFolderDescription';
 import { projectOperations, projectFields } from './descriptions/ProjectDescription';
+import { roleOperations, roleFields } from './descriptions/RoleDescription';
+import { rolesChartOperations, rolesChartFields } from './descriptions/RolesChartDescription';
 import { teamOperations, teamFields } from './descriptions/TeamDescription';
 import { todoOperations, todoFields } from './descriptions/TodoDescription';
+import { visionOperations, visionFields } from './descriptions/VisionDescription';
 
 const BASE_URL = 'https://2.strety.com';
 
@@ -105,6 +112,7 @@ export class Strety implements INodeType {
 				options: [
 					{ name: 'Goal', value: 'goal' },
 					{ name: 'Goal Check-In', value: 'goalCheckIn' },
+					{ name: 'Goal Milestone', value: 'goalMilestone' },
 					{ name: 'Headline', value: 'headline' },
 					{ name: 'Issue', value: 'issue' },
 					{ name: 'Meeting', value: 'meeting' },
@@ -115,8 +123,11 @@ export class Strety implements INodeType {
 					{ name: 'Playbook', value: 'playbook' },
 					{ name: 'Playbook Folder', value: 'playbookFolder' },
 					{ name: 'Project', value: 'project' },
+					{ name: 'Role', value: 'role' },
+					{ name: 'Roles Chart', value: 'rolesChart' },
 					{ name: 'Team', value: 'team' },
 					{ name: 'Todo', value: 'todo' },
+					{ name: 'Vision', value: 'vision' },
 				],
 				default: 'goal',
 			},
@@ -124,6 +135,8 @@ export class Strety implements INodeType {
 			...goalFields,
 			...goalCheckInOperations,
 			...goalCheckInFields,
+			...goalMilestoneOperations,
+			...goalMilestoneFields,
 			...headlineOperations,
 			...headlineFields,
 			...issueOperations,
@@ -144,10 +157,16 @@ export class Strety implements INodeType {
 			...playbookFolderFields,
 			...projectOperations,
 			...projectFields,
+			...roleOperations,
+			...roleFields,
+			...rolesChartOperations,
+			...rolesChartFields,
 			...teamOperations,
 			...teamFields,
 			...todoOperations,
 			...todoFields,
+			...visionOperations,
+			...visionFields,
 		],
 	};
 
@@ -165,6 +184,8 @@ export class Strety implements INodeType {
 					responseData = await handleGoal.call(this, operation, i);
 				} else if (resource === 'goalCheckIn') {
 					responseData = await handleGoalCheckIn.call(this, operation, i);
+				} else if (resource === 'goalMilestone') {
+					responseData = await handleGoalMilestone.call(this, operation, i);
 				} else if (resource === 'headline') {
 					responseData = await handleHeadline.call(this, operation, i);
 				} else if (resource === 'issue') {
@@ -185,10 +206,16 @@ export class Strety implements INodeType {
 					responseData = await handlePlaybookFolder.call(this, operation, i);
 				} else if (resource === 'project') {
 					responseData = await handleProject.call(this, operation, i);
+				} else if (resource === 'role') {
+					responseData = await handleRole.call(this, operation, i);
+				} else if (resource === 'rolesChart') {
+					responseData = await handleRolesChart.call(this, operation, i);
 				} else if (resource === 'team') {
 					responseData = await handleTeam.call(this, operation, i);
 				} else if (resource === 'todo') {
 					responseData = await handleTodo.call(this, operation, i);
+				} else if (resource === 'vision') {
+					responseData = await handleVision.call(this, operation, i);
 				} else {
 					throw new NodeApiError(this.getNode(), {
 						message: `Unknown resource: ${resource}`,
@@ -658,6 +685,55 @@ async function handleGoalCheckIn(
 	} as JsonObject);
 }
 
+async function handleGoalMilestone(
+	this: IExecuteFunctions,
+	operation: string,
+	i: number,
+): Promise<IDataObject | IDataObject[]> {
+	const goalId = this.getNodeParameter('goalId', i) as string;
+
+	if (operation === 'getAll') {
+		return handleGetAll.call(this, `/api/v1/goals/${goalId}/milestones`, i);
+	}
+
+	if (operation === 'get') {
+		const milestoneId = this.getNodeParameter('milestoneId', i) as string;
+		return handleGet.call(this, `/api/v1/goals/${goalId}/milestones/${milestoneId}`);
+	}
+
+	if (operation === 'create') {
+		const title = this.getNodeParameter('title', i) as string;
+		const additionalFields = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const attributes: IDataObject = { title, ...additionalFields };
+		return handleCreate.call(
+			this,
+			`/api/v1/goals/${goalId}/milestones`,
+			'goal_milestone',
+			attributes,
+		);
+	}
+
+	if (operation === 'update') {
+		const milestoneId = this.getNodeParameter('milestoneId', i) as string;
+		const updateFields = this.getNodeParameter('updateFields', i, {}) as IDataObject;
+		return handleUpdate.call(
+			this,
+			`/api/v1/goals/${goalId}/milestones/${milestoneId}`,
+			'goal_milestone',
+			updateFields,
+		);
+	}
+
+	if (operation === 'delete') {
+		const milestoneId = this.getNodeParameter('milestoneId', i) as string;
+		return handleDelete.call(this, `/api/v1/goals/${goalId}/milestones/${milestoneId}`);
+	}
+
+	throw new NodeApiError(this.getNode(), {
+		message: `Unknown operation: ${operation}`,
+	} as JsonObject);
+}
+
 async function handleHeadline(
 	this: IExecuteFunctions,
 	operation: string,
@@ -1052,6 +1128,53 @@ async function handleProject(
 		return handleGet.call(this, `/api/v1/projects/${id}`);
 	}
 
+	if (operation === 'create') {
+		const title = this.getNodeParameter('title', i) as string;
+		const additionalFields = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const attributes: IDataObject = { title, ...additionalFields };
+		return handleCreate.call(this, '/api/v1/projects', 'project', attributes);
+	}
+
+	throw new NodeApiError(this.getNode(), {
+		message: `Unknown operation: ${operation}`,
+	} as JsonObject);
+}
+
+async function handleRolesChart(
+	this: IExecuteFunctions,
+	operation: string,
+	i: number,
+): Promise<IDataObject | IDataObject[]> {
+	if (operation === 'getAll') {
+		return handleGetAll.call(this, '/api/v1/roles_charts', i);
+	}
+
+	if (operation === 'get') {
+		const id = this.getNodeParameter('rolesChartId', i) as string;
+		return handleGet.call(this, `/api/v1/roles_charts/${id}`);
+	}
+
+	throw new NodeApiError(this.getNode(), {
+		message: `Unknown operation: ${operation}`,
+	} as JsonObject);
+}
+
+async function handleRole(
+	this: IExecuteFunctions,
+	operation: string,
+	i: number,
+): Promise<IDataObject | IDataObject[]> {
+	const rolesChartId = this.getNodeParameter('rolesChartId', i) as string;
+
+	if (operation === 'getAll') {
+		return handleGetAll.call(this, `/api/v1/roles_charts/${rolesChartId}/roles`, i);
+	}
+
+	if (operation === 'get') {
+		const roleId = this.getNodeParameter('roleId', i) as string;
+		return handleGet.call(this, `/api/v1/roles_charts/${rolesChartId}/roles/${roleId}`);
+	}
+
 	throw new NodeApiError(this.getNode(), {
 		message: `Unknown operation: ${operation}`,
 	} as JsonObject);
@@ -1113,6 +1236,25 @@ async function handleTodo(
 	if (operation === 'delete') {
 		const id = this.getNodeParameter('todoId', i) as string;
 		return handleDelete.call(this, `/api/v1/todos/${id}`);
+	}
+
+	throw new NodeApiError(this.getNode(), {
+		message: `Unknown operation: ${operation}`,
+	} as JsonObject);
+}
+
+async function handleVision(
+	this: IExecuteFunctions,
+	operation: string,
+	i: number,
+): Promise<IDataObject | IDataObject[]> {
+	if (operation === 'getAll') {
+		return handleGetAll.call(this, '/api/v1/visions', i);
+	}
+
+	if (operation === 'get') {
+		const id = this.getNodeParameter('visionId', i) as string;
+		return handleGet.call(this, `/api/v1/visions/${id}`);
 	}
 
 	throw new NodeApiError(this.getNode(), {

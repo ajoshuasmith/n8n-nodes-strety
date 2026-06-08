@@ -13,6 +13,12 @@ export const projectOperations: INodeProperties[] = [
 		},
 		options: [
 			{
+				name: 'Create',
+				value: 'create',
+				description: 'Create a project',
+				action: 'Create a project',
+			},
+			{
 				name: 'Get',
 				value: 'get',
 				description: 'Get a project',
@@ -46,6 +52,81 @@ export const projectFields: INodeProperties[] = [
 			},
 		},
 		description: 'The UUID of the project',
+	},
+
+	// ----------------------------------
+	//         project: create
+	// ----------------------------------
+	{
+		displayName: 'Title',
+		name: 'title',
+		type: 'string',
+		required: true,
+		default: '',
+		displayOptions: {
+			show: {
+				resource: ['project'],
+				operation: ['create'],
+			},
+		},
+		description: 'The title or name that identifies the project',
+	},
+	{
+		displayName: 'Additional Fields',
+		name: 'additionalFields',
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		displayOptions: {
+			show: {
+				resource: ['project'],
+				operation: ['create'],
+			},
+		},
+		options: [
+			{
+				displayName: 'Description',
+				name: 'description',
+				type: 'string',
+				typeOptions: {
+					rows: 4,
+				},
+				default: '',
+				description: 'Plain text description of the project',
+			},
+			{
+				displayName: 'End Date',
+				name: 'end_date',
+				type: 'dateTime',
+				default: '',
+				description: 'Target completion date of the project',
+			},
+			{
+				displayName: 'Privacy',
+				name: 'privacy',
+				type: 'options',
+				default: 'private',
+				options: [
+					{ name: 'Private', value: 'private' },
+					{ name: 'Secret', value: 'secret' },
+				],
+				description: 'Access level for the project',
+			},
+			{
+				displayName: 'Start Date',
+				name: 'start_date',
+				type: 'dateTime',
+				default: '',
+				description: 'Scheduled or actual start date of the project',
+			},
+			{
+				displayName: 'Template ID',
+				name: 'template_id',
+				type: 'string',
+				default: '',
+				description: 'UUID of a project template to seed the project with content',
+			},
+		],
 	},
 
 	// ----------------------------------
