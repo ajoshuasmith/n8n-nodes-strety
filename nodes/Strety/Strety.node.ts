@@ -2,10 +2,10 @@ import type {
 	IDataObject,
 	IExecuteFunctions,
 	IHttpRequestMethods,
+	IHttpRequestOptions,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
-	IRequestOptions,
 	JsonObject,
 } from 'n8n-workflow';
 import { NodeApiError } from 'n8n-workflow';
@@ -256,9 +256,9 @@ async function stretyApiRequest(
 ): Promise<IDataObject> {
 	await enforceRateLimit();
 
-	const options: IRequestOptions = {
+	const options: IHttpRequestOptions = {
 		method,
-		uri: `${BASE_URL}${endpoint}`,
+		url: `${BASE_URL}${endpoint}`,
 		headers: {
 			Accept: 'application/vnd.api+json',
 			'Content-Type': 'application/vnd.api+json',
@@ -273,11 +273,10 @@ async function stretyApiRequest(
 		delete options.body;
 	}
 
-	return (await this.helpers.requestOAuth2.call(
+	return (await this.helpers.httpRequestWithAuthentication.call(
 		this,
 		'stretyOAuth2Api',
 		options,
-		{ tokenType: 'Bearer' },
 	)) as IDataObject;
 }
 
@@ -373,21 +372,20 @@ async function getEtag(
 ): Promise<string> {
 	await enforceRateLimit();
 
-	const options: IRequestOptions = {
+	const options: IHttpRequestOptions = {
 		method: 'GET',
-		uri: `${BASE_URL}${endpoint}`,
+		url: `${BASE_URL}${endpoint}`,
 		headers: {
 			Accept: 'application/vnd.api+json',
 		},
 		json: true,
-		resolveWithFullResponse: true,
+		returnFullResponse: true,
 	};
 
-	const response = (await this.helpers.requestOAuth2.call(
+	const response = (await this.helpers.httpRequestWithAuthentication.call(
 		this,
 		'stretyOAuth2Api',
 		options,
-		{ tokenType: 'Bearer' },
 	)) as IDataObject;
 
 	const headers = response.headers as IDataObject;

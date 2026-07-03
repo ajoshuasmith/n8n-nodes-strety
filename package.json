@@ -1,6 +1,6 @@
 {
 	"name": "@joshuanode/n8n-nodes-strety",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "n8n community node for the Strety strategic planning platform",
 	"keywords": [
 		"n8n-community-node-package",
