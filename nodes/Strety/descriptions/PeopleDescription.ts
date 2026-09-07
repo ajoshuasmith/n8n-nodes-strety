@@ -13,6 +13,12 @@ export const peopleOperations: INodeProperties[] = [
 		},
 		options: [
 			{
+				name: 'Get Current Person',
+				value: 'getCurrent',
+				description: 'Identify the authenticated person and their organization role',
+				action: 'Get current person',
+			},
+			{
 				name: 'Get Many',
 				value: 'getAll',
 				description: 'Get many people',
@@ -71,6 +77,28 @@ export const peopleFields: INodeProperties[] = [
 			},
 		},
 		options: [
+			{
+				displayName: 'Name',
+				name: 'name',
+				type: 'string',
+				default: '',
+				description: 'Filter by name (case-insensitive partial match)',
+			},
+			{
+				displayName: 'Email',
+				name: 'email',
+				type: 'string',
+				default: '',
+				description: 'Filter by email (case-insensitive partial match)',
+			},
+			{
+				displayName: 'Deactivated',
+				name: 'deactivated',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to return deactivated records; false returns records that are not deactivated',
+			},
 			{
 				displayName: 'Created After',
 				name: 'created_after',

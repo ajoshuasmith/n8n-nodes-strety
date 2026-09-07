@@ -1,4 +1,5 @@
 import type { INodeProperties } from 'n8n-workflow';
+import { idField } from './AdditionalResources';
 
 export const goalOperations: INodeProperties[] = [
 	{
@@ -12,6 +13,18 @@ export const goalOperations: INodeProperties[] = [
 			},
 		},
 		options: [
+			{
+				name: 'Archive',
+				value: 'archive',
+				description: 'Archive a goal',
+				action: 'Archive a goal',
+			},
+			{
+				name: 'Unarchive',
+				value: 'unarchive',
+				description: 'Unarchive a goal',
+				action: 'Unarchive a goal',
+			},
 			{
 				name: 'Create',
 				value: 'create',
@@ -64,15 +77,12 @@ export const goalFields: INodeProperties[] = [
 	//         goal: get, delete, update, backlog, unbacklog
 	// ----------------------------------
 	{
-		displayName: 'Goal ID',
-		name: 'goalId',
-		type: 'string',
+		...idField('goalId', 'Goal ID', 'searchGoals'),
 		required: true,
-		default: '',
 		displayOptions: {
 			show: {
 				resource: ['goal'],
-				operation: ['get', 'delete', 'update', 'backlog', 'unbacklog'],
+				operation: ['get', 'delete', 'update', 'archive', 'unarchive', 'backlog', 'unbacklog'],
 			},
 		},
 		description: 'The UUID of the goal',
@@ -125,6 +135,34 @@ export const goalFields: INodeProperties[] = [
 			},
 		},
 		options: [
+			{
+				displayName: 'Status',
+				name: 'status',
+				type: 'multiOptions',
+				default: [],
+				options: [
+					{ name: 'At Risk', value: 'at_risk' },
+					{ name: 'Cancelled', value: 'cancelled' },
+					{ name: 'Completed', value: 'completed' },
+					{ name: 'Missed', value: 'missed' },
+					{ name: 'Off Track', value: 'off_track' },
+					{ name: 'On Track', value: 'on_track' },
+				],
+				description: 'Return goals matching any selected status',
+			},
+			{
+				displayName: 'Archive Status',
+				name: 'archive_status',
+				type: 'options',
+				default: 'active',
+				options: [
+					{ name: 'Active', value: 'active' },
+					{ name: 'Archived', value: 'archived' },
+					{ name: 'Any', value: 'any' },
+				],
+				description:
+					'Include active records, archived records, or both. Omitted filters return only active records.',
+			},
 			{
 				displayName: 'Assignee ID',
 				name: 'assignee_id',
@@ -195,7 +233,8 @@ export const goalFields: INodeProperties[] = [
 					minValue: 1,
 					maxValue: 5,
 				},
-				description: 'Max number of recent check-ins to include (1-5). Only used when Include Check-Ins is enabled.',
+				description:
+					'Max number of recent check-ins to include (1-5). Only used when Include Check-Ins is enabled.',
 			},
 		],
 	},
@@ -301,7 +340,7 @@ export const goalFields: INodeProperties[] = [
 				name: 'description',
 				type: 'string',
 				default: '',
-				description: 'Detailed description of the goal\'s purpose',
+				description: "Detailed description of the goal's purpose",
 			},
 			{
 				displayName: 'Due Date',
@@ -407,7 +446,7 @@ export const goalFields: INodeProperties[] = [
 				name: 'description',
 				type: 'string',
 				default: '',
-				description: 'Detailed description of the goal\'s purpose',
+				description: "Detailed description of the goal's purpose",
 			},
 			{
 				displayName: 'Due Date',

@@ -26,6 +26,7 @@ This node supports the following resources and operations:
 - **Create** - Create a new goal
 - **Update** - Update a goal
 - **Delete** - Delete a goal
+- **Archive / Unarchive** - Change archive state without deleting the goal
 - **Backlog** - Move a goal to the backlog
 - **Remove From Backlog** - Remove a goal from the backlog
 
@@ -52,6 +53,7 @@ This node supports the following resources and operations:
 - **Create** - Create a new headline
 - **Update** - Update a headline
 - **Delete** - Delete a headline
+- **Archive / Unarchive** - Change archive state without deleting the headline
 
 ### Issue
 
@@ -92,29 +94,44 @@ This node supports the following resources and operations:
 
 ### People
 
-- **Get Many** - Get all people in the organization
+- **Get Many** - Get people, with name, email, and deactivation filters
+- **Get Current Person** - Identify the authenticated person and their role
 
-### Playbook
+### Doc
 
-- **Get Many** - Get multiple playbooks
-- **Get** - Get a single playbook
-- **Create** - Create a new playbook
-- **Update** - Update a playbook
-- **Delete** - Delete a playbook
+- **Get Many** - Get multiple docs
+- **Get** - Get a single doc
+- **Create** - Create a new doc
+- **Update** - Update a doc
+- **Delete** - Delete a doc
 
-### Playbook Folder
+### Doc Folder
 
-- **Get Many** - Get multiple playbook folders
-- **Get** - Get a single playbook folder
-- **Create** - Create a new playbook folder
-- **Update** - Update a playbook folder
-- **Delete** - Delete a playbook folder
+- **Get Many** - Get multiple doc folders
+- **Get** - Get a single doc folder
+- **Create** - Create a new doc folder
+- **Update** - Update a doc folder
+- **Delete** - Delete a doc folder
 
 ### Project
 
 - **Get Many** - Get multiple projects
 - **Get** - Get a single project
 - **Create** - Create a new project
+
+### Review
+
+- **Get Many** - List review summaries, filtered by reviewee, manager reviewer, or status
+- **Get** - Retrieve review details and available completed answers
+
+Lists include draft reviews; Get returns 404 for drafts. Get requires access to the review's space even if HR Center access allows listing it. Answers are returned only after completion, and peer feedback is never included by this API.
+
+### Shoutout
+
+- **Get Many / Get** - Retrieve recognition, with creator, recipient, and core value filters
+- **Create / Update / Delete** - Manage recognition messages
+
+Create requires a space, one or more recipient UUIDs, and one or more core value UUIDs. Use comma-separated IDs. Core values can be found in **Vision → Get**. Creating on behalf of another person requires admin or account-owner access.
 
 ### Roles Chart
 
@@ -143,6 +160,55 @@ This node supports the following resources and operations:
 
 - **Get Many** - Get multiple visions
 - **Get** - Get a single vision
+
+## API updates and existing workflows
+
+The implementation follows the [Strety v1 OpenAPI specification](https://2.strety.com/api/docs/v1/openapi.yaml), checked September 7, 2026.
+
+- **Docs migration:** Strety will remove `/playbooks` and `/playbooks/folders` on February 19, 2027. Use **Doc** and **Doc Folder** for new workflows. Existing **Playbook (Legacy)** and **Playbook Folder (Legacy)** configurations automatically call `/docs` and `/docs/folders`, send the new resource types, and retain legacy response type names and saved parameters. The flattened document-format `type` attribute continues to behave as before.
+- **Doc fields:** set document type and link service at creation. Update supports renewal schedules, **No Renewal**, and **New Revision**. Renewal day accepts 1–28 or -1 for the final day of the month. Doc Folder supports nesting through Parent Folder ID.
+- **Daily scorecards:** select `daily` when creating/updating a metric; the organization must have daily scorecards enabled. For daily check-ins, add **Date** in `YYYY-MM-DD` format. Weekly, monthly, quarterly, and annual check-in fields remain available.
+- **Archived records:** goals, headlines, and issues default to active records. Select **Archive Status → Any** or **Archived** to retrieve archived records, including when using Return All. Archive and Unarchive return the updated resource.
+- **List filters:** goals support multiple statuses; issues support resolved/unresolved; meetings and todos support completed/incomplete. Boolean `false` filters are sent explicitly.
+
+## AI Agent tools
+
+The Strety node is marked `usableAsTool`, allowing n8n to expose each configured operation as an AI Agent tool. Attach Strety using the agent's **Tool** connector and select the resource and operation for that tool. The tool executes the same OAuth, pagination, ETag, and rate-limit code as a normal Strety node.
+
+Useful tool sets:
+
+| Use case | Configure these Strety operations |
+| --- | --- |
+| Goal tracking | Goal Get Many with status filters; Goal Get; Goal Check-In Get Many/Create; Goal Milestone Get Many |
+| Scorecard assistant | Metric Get Many/Get; Metric Check-In Get Many/Create, including daily Date |
+| Meeting preparation | Meeting Get Many/Get; Issue Get Many with Resolved=false; Todo Get Many with Completed=false; Headline Get Many |
+| Docs lookup and maintenance | Doc Get Many/Get; Doc Folder Get Many; add Doc Create/Update when needed |
+| Recognition | People Get Many; Vision Get; Shoutout Get Many/Create |
+| Review summaries | Review Get Many/Get for records the credential can access |
+| Archive housekeeping | Goal, Headline, or Issue Archive/Unarchive with a known UUID |
+| Identity lookup | People Get Current Person |
+
+Keep **Resource**, **Operation**, credentials, and the intended space fixed in the tool configuration. Let the model supply the specific inputs it needs using n8n's **Let AI specify** button or `$fromAI()` expressions. Add separate configured tools for separate operations. Use a bounded Limit for list tools unless the task requires every record. Strety list endpoints expose only their documented filters; a fixed Space ID on a create tool does not scope other list tools.
+
+Examples, entered in the relevant parameter's expression editor:
+
+```javascript
+// Doc ID, using By ID mode:
+{{ $fromAI('doc_id', 'An existing Strety doc UUID returned by the lookup tool', 'string') }}
+
+// Daily metric check-in Date:
+{{ $fromAI('date', 'Calendar date in YYYY-MM-DD format', 'string') }}
+
+// Daily metric check-in Value:
+{{ $fromAI('value', 'Measured numeric scorecard value', 'number') }}
+
+// Shoutout Recipient IDs:
+{{ $fromAI('recipient_ids', 'Comma-separated person UUIDs from the People lookup tool', 'string') }}
+```
+
+Only attach write/delete tools that the workflow should perform. n8n's human-review controls can be applied to consequential tool calls in the surrounding workflow. No separate AI API key is needed by Strety; the AI Agent supplies its own model connection. Installation and tool availability still depend on the host n8n version and community-package policy.
+
+See [n8n's AI parameter documentation](https://github.com/n8n-io/n8n-docs/blob/main/docs/build/integrate-ai/ai-examples/use-ai-for-parameters.md) and [the native tool wrapper](https://github.com/n8n-io/n8n/blob/master/packages/core/src/execution-engine/node-execution-context/utils/create-node-as-tool.ts).
 
 ## Credentials
 
@@ -173,8 +239,28 @@ In n8n:
 
 ## Compatibility
 
-- n8n version: 1.0+
-- Node.js version: 18.10+
+- Normal workflow nodes retain node type version 1.
+- AI tools require an n8n version supporting community nodes as tools.
+- Package engine: Node.js >=18.17.0; use a Node.js version supported by your n8n installation.
+
+## Development and validation
+
+```bash
+npm ci
+npm test
+npm run lint
+npm pack --dry-run
+```
+
+`npm test` builds the package and runs contract tests against mocked Strety responses. The suite covers the API migration, new operations, pagination, filters, error paths, item pairing, and concurrent throttling. The test runner uses Node.js 22+ mock timers; this does not change the package runtime engine declaration.
+
+An optional integration smoke check uses the published `n8n-core` tool wrapper:
+
+```bash
+N8N_TOOL_WRAPPER_PATH=/absolute/path/to/create-node-as-tool.js node tests/ai-wrapper-smoke.cjs
+```
+
+The wrapper's own dependencies must be installed alongside it. Set `STRETY_PACKAGE_DIR` to an unpacked package to test its built artifact. This check constructs a native tool, validates `$fromAI()` inputs, invokes the Strety node, and verifies the result with mocked HTTP. It does not call a live model or mutate a Strety account.
 
 ## Resources
 

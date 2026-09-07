@@ -48,6 +48,14 @@ export const metricOperations: INodeProperties[] = [
 ];
 
 export const metricFields: INodeProperties[] = [
+	{
+		displayName:
+			'Daily frequency requires daily scorecards enabled in Strety. Daily check-ins require a date.',
+		name: 'dailyNotice',
+		type: 'notice',
+		default: '',
+		displayOptions: { show: { resource: ['metric'], operation: ['create', 'update'] } },
+	},
 	// ----------------------------------
 	//         metric: get, update, delete
 	// ----------------------------------
@@ -129,6 +137,7 @@ export const metricFields: INodeProperties[] = [
 					{ name: 'Annual', value: 'annual' },
 					{ name: 'Monthly', value: 'monthly' },
 					{ name: 'Quarterly', value: 'quarterly' },
+					{ name: 'Daily', value: 'daily' },
 					{ name: 'Weekly', value: 'weekly' },
 				],
 				description: 'Filter by check-in frequency',
@@ -189,7 +198,8 @@ export const metricFields: INodeProperties[] = [
 					minValue: 1,
 					maxValue: 5,
 				},
-				description: 'Max number of recent check-ins to include (1-5). Only used when Include Check-Ins is enabled.',
+				description:
+					'Max number of recent check-ins to include (1-5). Only used when Include Check-Ins is enabled.',
 			},
 		],
 	},
@@ -273,6 +283,7 @@ export const metricFields: INodeProperties[] = [
 					{ name: 'Annual', value: 'annual' },
 					{ name: 'Monthly', value: 'monthly' },
 					{ name: 'Quarterly', value: 'quarterly' },
+					{ name: 'Daily', value: 'daily' },
 					{ name: 'Weekly', value: 'weekly' },
 				],
 				description: 'How often check-ins are expected',
@@ -376,6 +387,7 @@ export const metricFields: INodeProperties[] = [
 					{ name: 'Annual', value: 'annual' },
 					{ name: 'Monthly', value: 'monthly' },
 					{ name: 'Quarterly', value: 'quarterly' },
+					{ name: 'Daily', value: 'daily' },
 					{ name: 'Weekly', value: 'weekly' },
 				],
 				description: 'How often check-ins are expected',

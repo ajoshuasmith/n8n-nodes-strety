@@ -1,5 +1,7 @@
 import type {
 	IDataObject,
+	ILoadOptionsFunctions,
+	INodeListSearchResult,
 	IExecuteFunctions,
 	IHttpRequestMethods,
 	IHttpRequestOptions,
@@ -8,7 +10,7 @@ import type {
 	INodeTypeDescription,
 	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError } from 'n8n-workflow';
+import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 
 import { goalOperations, goalFields } from './descriptions/GoalDescription';
 import { goalCheckInOperations, goalCheckInFields } from './descriptions/GoalCheckInDescription';
@@ -38,6 +40,8 @@ import { teamOperations, teamFields } from './descriptions/TeamDescription';
 import { todoOperations, todoFields } from './descriptions/TodoDescription';
 import { visionOperations, visionFields } from './descriptions/VisionDescription';
 
+import { additionalResourceProperties } from './descriptions/AdditionalResources';
+
 const BASE_URL = 'https://2.strety.com';
 
 /**
@@ -64,21 +68,18 @@ const sleep = (ms: number): Promise<void> =>
 	});
 
 async function enforceRateLimit(): Promise<void> {
-	const now = Date.now();
-
-	while (requestTimestamps.length > 0 && requestTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
-		requestTimestamps.shift();
-	}
-
-	if (requestTimestamps.length >= RATE_LIMIT_MAX) {
-		const waitUntil = requestTimestamps[0] + RATE_LIMIT_WINDOW_MS;
-		const waitMs = waitUntil - now + 100;
-		if (waitMs > 0) {
-			await sleep(waitMs);
+	// Recheck after sleeping: several AI tools/workflows may be waiting for a slot.
+	while (true) {
+		const now = Date.now();
+		while (requestTimestamps.length && requestTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
+			requestTimestamps.shift();
 		}
+		if (requestTimestamps.length < RATE_LIMIT_MAX) {
+			requestTimestamps.push(now);
+			return;
+		}
+		await sleep(Math.max(1, requestTimestamps[0] + RATE_LIMIT_WINDOW_MS - now + 100));
 	}
-
-	requestTimestamps.push(Date.now());
 }
 
 // ─── Node Definition ──────────────────────────────────────────────────────────
@@ -90,6 +91,7 @@ export class Strety implements INodeType {
 		icon: 'file:strety.png',
 		group: ['transform'],
 		version: 1,
+		usableAsTool: true,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description: 'Interact with the Strety strategic planning platform',
 		defaults: {
@@ -110,6 +112,8 @@ export class Strety implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				options: [
+					{ name: 'Doc', value: 'doc' },
+					{ name: 'Doc Folder', value: 'docFolder' },
 					{ name: 'Goal', value: 'goal' },
 					{ name: 'Goal Check-In', value: 'goalCheckIn' },
 					{ name: 'Goal Milestone', value: 'goalMilestone' },
@@ -120,17 +124,20 @@ export class Strety implements INodeType {
 					{ name: 'Metric', value: 'metric' },
 					{ name: 'Metric Check-In', value: 'metricCheckIn' },
 					{ name: 'People', value: 'people' },
-					{ name: 'Playbook', value: 'playbook' },
-					{ name: 'Playbook Folder', value: 'playbookFolder' },
+					{ name: 'Playbook (Legacy)', value: 'playbook' },
+					{ name: 'Playbook Folder (Legacy)', value: 'playbookFolder' },
 					{ name: 'Project', value: 'project' },
+					{ name: 'Review', value: 'review' },
 					{ name: 'Role', value: 'role' },
 					{ name: 'Roles Chart', value: 'rolesChart' },
+					{ name: 'Shoutout', value: 'shoutout' },
 					{ name: 'Team', value: 'team' },
 					{ name: 'Todo', value: 'todo' },
 					{ name: 'Vision', value: 'vision' },
 				],
 				default: 'goal',
 			},
+			...additionalResourceProperties,
 			...goalOperations,
 			...goalFields,
 			...goalCheckInOperations,
@@ -170,6 +177,23 @@ export class Strety implements INodeType {
 		],
 	};
 
+	methods = {
+		listSearch: {
+			searchGoals: makeListSearch('/api/v1/goals', undefined, { 'filter[archive_status]': 'any' }),
+			searchHeadlines: makeListSearch('/api/v1/headlines', undefined, {
+				'filter[archive_status]': 'any',
+			}),
+			searchIssues: makeListSearch('/api/v1/issues', undefined, {
+				'filter[archive_status]': 'any',
+			}),
+			searchDocs: makeListSearch('/api/v1/docs'),
+			searchDocFolders: makeListSearch('/api/v1/docs/folders'),
+			searchPeople: makeListSearch('/api/v1/people', 'name'),
+			searchReviews: makeListSearch('/api/v1/reviews'),
+			searchShoutouts: makeListSearch('/api/v1/shoutouts'),
+		},
+	};
+
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
@@ -180,7 +204,9 @@ export class Strety implements INodeType {
 			try {
 				let responseData: IDataObject | IDataObject[];
 
-				if (resource === 'goal') {
+				if (['doc', 'docFolder', 'review', 'shoutout'].includes(resource)) {
+					responseData = await handleAdditionalResource.call(this, resource, operation, i);
+				} else if (resource === 'goal') {
 					responseData = await handleGoal.call(this, operation, i);
 				} else if (resource === 'goalCheckIn') {
 					responseData = await handleGoalCheckIn.call(this, operation, i);
@@ -247,7 +273,7 @@ export class Strety implements INodeType {
 // ─── API Helpers ──────────────────────────────────────────────────────────────
 
 async function stretyApiRequest(
-	this: IExecuteFunctions,
+	this: IExecuteFunctions | ILoadOptionsFunctions,
 	method: IHttpRequestMethods,
 	endpoint: string,
 	body?: IDataObject,
@@ -258,14 +284,16 @@ async function stretyApiRequest(
 
 	const options: IHttpRequestOptions = {
 		method,
-		url: `${BASE_URL}${endpoint}`,
+		url: `${BASE_URL}${docsEndpoint(endpoint)}`,
 		headers: {
 			Accept: 'application/vnd.api+json',
 			'Content-Type': 'application/vnd.api+json',
 			...extraHeaders,
 		},
 		qs,
-		body,
+		// Keys already contain [] for Strety arrays; avoid n8n adding a second index.
+		arrayFormat: 'repeat',
+		body: endpoint.startsWith('/api/v1/playbooks') ? migrateLegacyBody(body) : body,
 		json: true,
 	};
 
@@ -273,11 +301,14 @@ async function stretyApiRequest(
 		delete options.body;
 	}
 
-	return (await this.helpers.httpRequestWithAuthentication.call(
+	const response = (await this.helpers.httpRequestWithAuthentication.call(
 		this,
 		'stretyOAuth2Api',
 		options,
 	)) as IDataObject;
+	return response && endpoint.startsWith('/api/v1/playbooks')
+		? legacyDocResponse(response)
+		: response;
 }
 
 async function stretyApiRequestAllItems(
@@ -366,15 +397,12 @@ function buildJsonApiBody(type: string, attributes: IDataObject): IDataObject {
 
 // ─── CRUD Helpers ─────────────────────────────────────────────────────────────
 
-async function getEtag(
-	this: IExecuteFunctions,
-	endpoint: string,
-): Promise<string> {
+async function getEtag(this: IExecuteFunctions, endpoint: string): Promise<string> {
 	await enforceRateLimit();
 
 	const options: IHttpRequestOptions = {
 		method: 'GET',
-		url: `${BASE_URL}${endpoint}`,
+		url: `${BASE_URL}${docsEndpoint(endpoint)}`,
 		headers: {
 			Accept: 'application/vnd.api+json',
 		},
@@ -401,49 +429,25 @@ async function getEtag(
 }
 
 function addFiltersToQs(qs: IDataObject, filters: IDataObject): void {
-	if (filters.created_after) {
-		qs['filter[created_after]'] = filters.created_after;
-	}
-	if (filters.updated_after) {
-		qs['filter[updated_after]'] = filters.updated_after;
-	}
-	if (filters.assignee_id) {
-		qs['filter[assignee_id]'] = filters.assignee_id;
-	}
-	if (filters.owner_id) {
-		qs['filter[owner_id]'] = filters.owner_id;
-	}
-	if (filters.parent_id) {
-		qs['filter[parent_id]'] = filters.parent_id;
-	}
-	if (filters.issue_type) {
-		qs['filter[issue_type]'] = filters.issue_type;
-	}
-	if (filters.checkin_frequency) {
-		qs['filter[checkin_frequency]'] = filters.checkin_frequency;
-	}
-	if (filters.archived !== undefined && filters.archived !== '') {
-		qs['filter[archived]'] = filters.archived;
-	}
-	if (filters.folder_id) {
-		qs['filter[folder_id]'] = filters.folder_id;
-	}
-	if (filters.ids) {
-		const idList = (filters.ids as string)
-			.split(',')
-			.map((id: string) => id.trim())
-			.filter(Boolean);
-		idList.forEach((id, index) => {
-			qs[`filter[ids][${index}]`] = id;
-		});
+	for (const [key, raw] of Object.entries(filters)) {
+		const value = locatorValue(raw);
+		if (value === undefined || value === null || value === '') continue;
+		if (key === 'ids' || Array.isArray(value)) {
+			const values = Array.isArray(value)
+				? value
+				: String(value)
+						.split(',')
+						.map((id) => id.trim())
+						.filter(Boolean);
+			// Empty brackets match Strety's documented array parameters.
+			if (values.length) qs[`filter[${key}][]`] = values;
+		} else {
+			qs[`filter[${key}]`] = value;
+		}
 	}
 }
 
-function addIncludeOptions(
-	ctx: IExecuteFunctions,
-	qs: IDataObject,
-	i: number,
-): void {
+function addIncludeOptions(ctx: IExecuteFunctions, qs: IDataObject, i: number): void {
 	try {
 		const options = ctx.getNodeParameter('options', i, {}) as IDataObject;
 		if (options.include) {
@@ -531,10 +535,7 @@ async function handleGetWithIncludes(
 	return flattenSingle(response);
 }
 
-async function handleGet(
-	this: IExecuteFunctions,
-	endpoint: string,
-): Promise<IDataObject> {
+async function handleGet(this: IExecuteFunctions, endpoint: string): Promise<IDataObject> {
 	const response = await stretyApiRequest.call(this, 'GET', endpoint);
 	return flattenSingle(response);
 }
@@ -564,10 +565,7 @@ async function handleUpdate(
 	return flattenSingle(response);
 }
 
-async function handleDelete(
-	this: IExecuteFunctions,
-	endpoint: string,
-): Promise<IDataObject> {
+async function handleDelete(this: IExecuteFunctions, endpoint: string): Promise<IDataObject> {
 	await stretyApiRequest.call(this, 'DELETE', endpoint);
 	return { success: true };
 }
@@ -579,12 +577,22 @@ async function handleGoal(
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
+	if (operation === 'archive' || operation === 'unarchive') {
+		const id = readId.call(this, 'goalId', i);
+		const response = await stretyApiRequest.call(
+			this,
+			operation === 'archive' ? 'POST' : 'DELETE',
+			`/api/v1/goals/${id}/archive`,
+		);
+		return flattenSingle(response);
+	}
+
 	if (operation === 'getAll') {
 		return handleGetAllWithIncludes.call(this, '/api/v1/goals', i);
 	}
 
 	if (operation === 'get') {
-		const id = this.getNodeParameter('goalId', i) as string;
+		const id = readId.call(this, 'goalId', i);
 		return handleGetWithIncludes.call(this, `/api/v1/goals/${id}`, i);
 	}
 
@@ -607,24 +615,24 @@ async function handleGoal(
 	}
 
 	if (operation === 'update') {
-		const id = this.getNodeParameter('goalId', i) as string;
+		const id = readId.call(this, 'goalId', i);
 		const updateFields = this.getNodeParameter('updateFields', i, {}) as IDataObject;
 		return handleUpdate.call(this, `/api/v1/goals/${id}`, 'goal', updateFields);
 	}
 
 	if (operation === 'delete') {
-		const id = this.getNodeParameter('goalId', i) as string;
+		const id = readId.call(this, 'goalId', i);
 		return handleDelete.call(this, `/api/v1/goals/${id}`);
 	}
 
 	if (operation === 'backlog') {
-		const id = this.getNodeParameter('goalId', i) as string;
+		const id = readId.call(this, 'goalId', i);
 		const response = await stretyApiRequest.call(this, 'POST', `/api/v1/goals/${id}/backlog`);
 		return flattenSingle(response);
 	}
 
 	if (operation === 'unbacklog') {
-		const id = this.getNodeParameter('goalId', i) as string;
+		const id = readId.call(this, 'goalId', i);
 		const response = await stretyApiRequest.call(this, 'DELETE', `/api/v1/goals/${id}/backlog`);
 		return flattenSingle(response);
 	}
@@ -639,7 +647,7 @@ async function handleGoalCheckIn(
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
-	const goalId = this.getNodeParameter('goalId', i) as string;
+	const goalId = readId.call(this, 'goalId', i);
 
 	if (operation === 'getAll') {
 		return handleGetAll.call(this, `/api/v1/goals/${goalId}/check_ins`, i);
@@ -688,7 +696,7 @@ async function handleGoalMilestone(
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
-	const goalId = this.getNodeParameter('goalId', i) as string;
+	const goalId = readId.call(this, 'goalId', i);
 
 	if (operation === 'getAll') {
 		return handleGetAll.call(this, `/api/v1/goals/${goalId}/milestones`, i);
@@ -737,12 +745,22 @@ async function handleHeadline(
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
+	if (operation === 'archive' || operation === 'unarchive') {
+		const id = readId.call(this, 'headlineId', i);
+		const response = await stretyApiRequest.call(
+			this,
+			operation === 'archive' ? 'POST' : 'DELETE',
+			`/api/v1/headlines/${id}/archive`,
+		);
+		return flattenSingle(response);
+	}
+
 	if (operation === 'getAll') {
 		return handleGetAll.call(this, '/api/v1/headlines', i);
 	}
 
 	if (operation === 'get') {
-		const id = this.getNodeParameter('headlineId', i) as string;
+		const id = readId.call(this, 'headlineId', i);
 		return handleGet.call(this, `/api/v1/headlines/${id}`);
 	}
 
@@ -761,13 +779,13 @@ async function handleHeadline(
 	}
 
 	if (operation === 'update') {
-		const id = this.getNodeParameter('headlineId', i) as string;
+		const id = readId.call(this, 'headlineId', i);
 		const updateFields = this.getNodeParameter('updateFields', i, {}) as IDataObject;
 		return handleUpdate.call(this, `/api/v1/headlines/${id}`, 'headline', updateFields);
 	}
 
 	if (operation === 'delete') {
-		const id = this.getNodeParameter('headlineId', i) as string;
+		const id = readId.call(this, 'headlineId', i);
 		return handleDelete.call(this, `/api/v1/headlines/${id}`);
 	}
 
@@ -781,12 +799,22 @@ async function handleIssue(
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
+	if (operation === 'archive' || operation === 'unarchive') {
+		const id = readId.call(this, 'issueId', i);
+		const response = await stretyApiRequest.call(
+			this,
+			operation === 'archive' ? 'POST' : 'DELETE',
+			`/api/v1/issues/${id}/archive`,
+		);
+		return flattenSingle(response);
+	}
+
 	if (operation === 'getAll') {
 		return handleGetAll.call(this, '/api/v1/issues', i);
 	}
 
 	if (operation === 'get') {
-		const id = this.getNodeParameter('issueId', i) as string;
+		const id = readId.call(this, 'issueId', i);
 		return handleGet.call(this, `/api/v1/issues/${id}`);
 	}
 
@@ -805,13 +833,13 @@ async function handleIssue(
 	}
 
 	if (operation === 'update') {
-		const id = this.getNodeParameter('issueId', i) as string;
+		const id = readId.call(this, 'issueId', i);
 		const updateFields = this.getNodeParameter('updateFields', i, {}) as IDataObject;
 		return handleUpdate.call(this, `/api/v1/issues/${id}`, 'issue', updateFields);
 	}
 
 	if (operation === 'delete') {
-		const id = this.getNodeParameter('issueId', i) as string;
+		const id = readId.call(this, 'issueId', i);
 		return handleDelete.call(this, `/api/v1/issues/${id}`);
 	}
 
@@ -946,6 +974,7 @@ async function handleMetricCheckIn(
 	if (operation === 'create') {
 		const value = this.getNodeParameter('value', i) as number;
 		const additionalFields = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		validateDailyDate.call(this, additionalFields.date);
 		const attributes: IDataObject = { value, ...additionalFields };
 		return handleCreate.call(
 			this,
@@ -981,6 +1010,8 @@ async function handlePeople(
 	operation: string,
 	i: number,
 ): Promise<IDataObject | IDataObject[]> {
+	if (operation === 'getCurrent') return handleGet.call(this, '/api/v1/me');
+
 	if (operation === 'getAll') {
 		return handleGetAll.call(this, '/api/v1/people', i);
 	}
@@ -997,7 +1028,7 @@ async function handlePeople(
  * `attributes` in place.
  */
 function composeRenewalScheduler(attributes: IDataObject): void {
-	const interval = attributes.renewal_interval as number | undefined;
+	const interval = attributes.renewal_interval as number | null | undefined;
 	const dayOfMonth = attributes.renewal_day_of_month as number | undefined;
 
 	if (interval !== undefined || dayOfMonth !== undefined) {
@@ -1083,12 +1114,7 @@ async function handlePlaybookFolder(
 			space_type: spaceType,
 			...additionalFields,
 		};
-		return handleCreate.call(
-			this,
-			'/api/v1/playbooks/folders',
-			'playbook_folder',
-			attributes,
-		);
+		return handleCreate.call(this, '/api/v1/playbooks/folders', 'playbook_folder', attributes);
 	}
 
 	if (operation === 'update') {
@@ -1258,4 +1284,235 @@ async function handleVision(
 	throw new NodeApiError(this.getNode(), {
 		message: `Unknown operation: ${operation}`,
 	} as JsonObject);
+}
+
+// The legacy resource names and saved parameters remain valid after the API sunset.
+function docsEndpoint(endpoint: string): string {
+	return endpoint.replace(/^\/api\/v1\/playbooks(?=\/|$)/, '/api/v1/docs');
+}
+
+function migrateLegacyBody(body?: IDataObject): IDataObject | undefined {
+	if (!body?.data) return body;
+	const data = body.data as IDataObject;
+	return {
+		...body,
+		data: { ...data, type: data.type === 'playbook_folder' ? 'doc_folder' : 'doc' },
+	};
+}
+
+function legacyDocResponse(response: IDataObject): IDataObject {
+	const convert = (resource: IDataObject): IDataObject => {
+		const type =
+			resource.type === 'doc'
+				? 'playbook'
+				: resource.type === 'doc_folder'
+					? 'playbook_folder'
+					: resource.type;
+		const result: IDataObject = { ...resource, type };
+		if (resource.relationships) {
+			result.relationships = Object.fromEntries(
+				Object.entries(resource.relationships as IDataObject).map(([key, value]) => {
+					const relation = value as IDataObject;
+					return [
+						key,
+						{
+							...relation,
+							data: Array.isArray(relation.data)
+								? relation.data.map((item) => convert(item as IDataObject))
+								: relation.data
+									? convert(relation.data as IDataObject)
+									: relation.data,
+						},
+					];
+				}),
+			);
+		}
+		return result;
+	};
+	return {
+		...response,
+		...(response.data
+			? {
+					data: Array.isArray(response.data)
+						? response.data.map((item) => convert(item as IDataObject))
+						: convert(response.data as IDataObject),
+				}
+			: {}),
+		...(Array.isArray(response.included)
+			? { included: response.included.map((item) => convert(item as IDataObject)) }
+			: {}),
+	};
+}
+
+function locatorValue(value: IDataObject[string]): IDataObject[string] {
+	if (value && typeof value === 'object' && !Array.isArray(value) && 'value' in value) {
+		return (value as IDataObject).value;
+	}
+	return value;
+}
+
+function readId(this: IExecuteFunctions, name: string, i: number): string {
+	const value = locatorValue(this.getNodeParameter(name, i) as IDataObject[string]);
+	if (
+		typeof value !== 'string' ||
+		!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+	) {
+		throw new NodeOperationError(this.getNode(), `${name} must be a Strety UUID`, { itemIndex: i });
+	}
+	return value;
+}
+
+function attributesFromFields(fields: IDataObject): IDataObject {
+	return Object.fromEntries(
+		Object.entries(fields).map(([key, value]) => [key, locatorValue(value)]),
+	);
+}
+
+function idArray(this: IExecuteFunctions, value: IDataObject[string], label: string): string[] {
+	const values = Array.isArray(value)
+		? value
+		: typeof value === 'string'
+			? value
+					.split(',')
+					.map((id) => id.trim())
+					.filter(Boolean)
+			: [];
+	if (
+		!values.length ||
+		values.some(
+			(id) =>
+				typeof id !== 'string' ||
+				!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id),
+		)
+	) {
+		throw new NodeOperationError(
+			this.getNode(),
+			`${label} must contain at least one valid Strety UUID`,
+		);
+	}
+	return values as string[];
+}
+
+function validateDailyDate(this: IExecuteFunctions, value: IDataObject[string]): void {
+	if (value === undefined) return;
+	if (
+		typeof value !== 'string' ||
+		!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+		Number.isNaN(Date.parse(value)) ||
+		new Date(value).toISOString().slice(0, 10) !== value
+	) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Date must be a valid calendar date in YYYY-MM-DD format',
+		);
+	}
+}
+
+function makeListSearch(endpoint: string, serverFilter?: string, fixedQuery: IDataObject = {}) {
+	return async function (
+		this: ILoadOptionsFunctions,
+		filter = '',
+		paginationToken?: string,
+	): Promise<INodeListSearchResult> {
+		const page = Number(paginationToken ?? 1);
+		if (!Number.isInteger(page) || page < 1)
+			throw new NodeOperationError(this.getNode(), 'Invalid list page');
+		const qs: IDataObject = { ...fixedQuery, 'page[size]': 20, 'page[number]': page };
+		if (filter && serverFilter) qs[`filter[${serverFilter}]`] = filter;
+		const response = await stretyApiRequest.call(this, 'GET', endpoint, undefined, qs);
+		const data = (response.data ?? []) as IDataObject[];
+		const results = data
+			.map((item) => {
+				const attributes = item.attributes as IDataObject | undefined;
+				return {
+					name: String(attributes?.title ?? attributes?.name ?? attributes?.content ?? item.id),
+					value: String(item.id),
+				};
+			})
+			.filter(
+				(item) =>
+					!filter ||
+					serverFilter ||
+					item.name.toLowerCase().includes(filter.toLowerCase()) ||
+					item.value.includes(filter),
+			);
+		const total = (response.meta as IDataObject | undefined)?.total_count;
+		const nextPage =
+			data.length === 20 && !(typeof total === 'number' && page * 20 >= total)
+				? String(page + 1)
+				: undefined;
+		return { results, paginationToken: nextPage };
+	};
+}
+
+async function handleAdditionalResource(
+	this: IExecuteFunctions,
+	resource: string,
+	operation: string,
+	i: number,
+): Promise<IDataObject | IDataObject[]> {
+	const config: Record<string, { endpoint: string; type: string; id: string }> = {
+		doc: { endpoint: '/api/v1/docs', type: 'doc', id: 'docId' },
+		docFolder: { endpoint: '/api/v1/docs/folders', type: 'doc_folder', id: 'folderId' },
+		review: { endpoint: '/api/v1/reviews', type: 'review', id: 'reviewId' },
+		shoutout: { endpoint: '/api/v1/shoutouts', type: 'shoutout', id: 'shoutoutId' },
+	};
+	const { endpoint, type, id: idParam } = config[resource];
+	if (operation === 'getAll') return handleGetAll.call(this, endpoint, i);
+	if (operation === 'get')
+		return handleGet.call(this, `${endpoint}/${readId.call(this, idParam, i)}`);
+	if (resource === 'review')
+		throw new NodeOperationError(this.getNode(), 'Reviews support only Get and Get Many');
+	if (operation === 'delete')
+		return handleDelete.call(this, `${endpoint}/${readId.call(this, idParam, i)}`);
+	if (operation !== 'create' && operation !== 'update')
+		throw new NodeOperationError(this.getNode(), `Unknown operation: ${operation}`);
+
+	const attributes = attributesFromFields(
+		this.getNodeParameter(
+			operation === 'create' ? 'additionalFields' : 'updateFields',
+			i,
+			{},
+		) as IDataObject,
+	);
+	if (operation === 'create') {
+		attributes.space_id = readId.call(this, 'spaceId', i);
+		attributes.space_type = this.getNodeParameter('spaceType', i) as string;
+		if (resource === 'shoutout') {
+			attributes.recipient_ids = idArray.call(
+				this,
+				this.getNodeParameter('recipientIds', i) as string,
+				'Recipient IDs',
+			);
+			attributes.core_value_ids = idArray.call(
+				this,
+				this.getNodeParameter('coreValueIds', i) as string,
+				'Core Value IDs',
+			);
+		} else {
+			attributes.title = this.getNodeParameter('title', i) as string;
+			if (resource === 'doc') attributes.type = this.getNodeParameter('docType', i) as string;
+		}
+	} else if (resource === 'shoutout') {
+		for (const key of ['recipient_ids', 'core_value_ids']) {
+			if (attributes[key] !== undefined) attributes[key] = idArray.call(this, attributes[key], key);
+		}
+	} else if (resource === 'doc') {
+		if (attributes.renewal_interval === 'none') attributes.renewal_interval = null;
+		const day = attributes.renewal_day_of_month;
+		if (
+			day !== undefined &&
+			attributes.renewal_interval !== null &&
+			(typeof day !== 'number' || !Number.isInteger(day) || (day !== -1 && (day < 1 || day > 28)))
+		) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Renewal day must be 1–28 or -1 for the last day of the month',
+			);
+		}
+		composeRenewalScheduler(attributes);
+	}
+	return operation === 'create'
+		? handleCreate.call(this, endpoint, type, attributes)
+		: handleUpdate.call(this, `${endpoint}/${readId.call(this, idParam, i)}`, type, attributes);
 }

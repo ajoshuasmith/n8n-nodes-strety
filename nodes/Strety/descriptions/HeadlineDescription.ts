@@ -1,4 +1,5 @@
 import type { INodeProperties } from 'n8n-workflow';
+import { idField } from './AdditionalResources';
 
 export const headlineOperations: INodeProperties[] = [
 	{
@@ -12,6 +13,18 @@ export const headlineOperations: INodeProperties[] = [
 			},
 		},
 		options: [
+			{
+				name: 'Archive',
+				value: 'archive',
+				description: 'Archive a headline',
+				action: 'Archive a headline',
+			},
+			{
+				name: 'Unarchive',
+				value: 'unarchive',
+				description: 'Unarchive a headline',
+				action: 'Unarchive a headline',
+			},
 			{
 				name: 'Create',
 				value: 'create',
@@ -52,15 +65,12 @@ export const headlineFields: INodeProperties[] = [
 	//         headline: get, update, delete
 	// ----------------------------------
 	{
-		displayName: 'Headline ID',
-		name: 'headlineId',
-		type: 'string',
+		...idField('headlineId', 'Headline ID', 'searchHeadlines'),
 		required: true,
-		default: '',
 		displayOptions: {
 			show: {
 				resource: ['headline'],
-				operation: ['get', 'update', 'delete'],
+				operation: ['get', 'update', 'delete', 'archive', 'unarchive'],
 			},
 		},
 		description: 'The UUID of the headline',
@@ -113,6 +123,19 @@ export const headlineFields: INodeProperties[] = [
 			},
 		},
 		options: [
+			{
+				displayName: 'Archive Status',
+				name: 'archive_status',
+				type: 'options',
+				default: 'active',
+				options: [
+					{ name: 'Active', value: 'active' },
+					{ name: 'Archived', value: 'archived' },
+					{ name: 'Any', value: 'any' },
+				],
+				description:
+					'Include active records, archived records, or both. Omitted filters return only active records.',
+			},
 			{
 				displayName: 'Created After',
 				name: 'created_after',

@@ -96,6 +96,14 @@ export const meetingFields: INodeProperties[] = [
 		},
 		options: [
 			{
+				displayName: 'Completed',
+				name: 'completed',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to return completed records; false returns records that are not completed',
+			},
+			{
 				displayName: 'Created After',
 				name: 'created_after',
 				type: 'dateTime',

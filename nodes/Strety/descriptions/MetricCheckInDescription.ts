@@ -186,6 +186,15 @@ export const metricCheckInFields: INodeProperties[] = [
 		},
 		options: [
 			{
+				displayName: 'Date',
+				name: 'date',
+				type: 'string',
+				default: '',
+				placeholder: '2026-09-07',
+				description:
+					'Required for daily metrics. Calendar date in YYYY-MM-DD format; ignored for other frequencies.',
+			},
+			{
 				displayName: 'Context',
 				name: 'context',
 				type: 'string',

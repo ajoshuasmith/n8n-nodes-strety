@@ -1,4 +1,5 @@
 import type { INodeProperties } from 'n8n-workflow';
+import { idField } from './AdditionalResources';
 
 export const issueOperations: INodeProperties[] = [
 	{
@@ -12,6 +13,18 @@ export const issueOperations: INodeProperties[] = [
 			},
 		},
 		options: [
+			{
+				name: 'Archive',
+				value: 'archive',
+				description: 'Archive a issue',
+				action: 'Archive a issue',
+			},
+			{
+				name: 'Unarchive',
+				value: 'unarchive',
+				description: 'Unarchive a issue',
+				action: 'Unarchive a issue',
+			},
 			{
 				name: 'Create',
 				value: 'create',
@@ -52,15 +65,12 @@ export const issueFields: INodeProperties[] = [
 	//         issue: get, update, delete
 	// ----------------------------------
 	{
-		displayName: 'Issue ID',
-		name: 'issueId',
-		type: 'string',
+		...idField('issueId', 'Issue ID', 'searchIssues'),
 		required: true,
-		default: '',
 		displayOptions: {
 			show: {
 				resource: ['issue'],
-				operation: ['get', 'update', 'delete'],
+				operation: ['get', 'update', 'delete', 'archive', 'unarchive'],
 			},
 		},
 		description: 'The UUID of the issue',
@@ -113,6 +123,27 @@ export const issueFields: INodeProperties[] = [
 			},
 		},
 		options: [
+			{
+				displayName: 'Resolved',
+				name: 'resolved',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to return resolved records; false returns records that are not resolved',
+			},
+			{
+				displayName: 'Archive Status',
+				name: 'archive_status',
+				type: 'options',
+				default: 'active',
+				options: [
+					{ name: 'Active', value: 'active' },
+					{ name: 'Archived', value: 'archived' },
+					{ name: 'Any', value: 'any' },
+				],
+				description:
+					'Include active records, archived records, or both. Omitted filters return only active records.',
+			},
 			{
 				displayName: 'Created After',
 				name: 'created_after',
