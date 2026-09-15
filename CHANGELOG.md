@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-09-15
+
+- Validate metric check-in periods against the parent metric frequency before POST, including ISO week/year boundaries and finite numeric values.
+- Preserve flattened JSON:API included records in an additive `included` output array on Get/Get Many; list items carry the included records from their response page.
+- Propagate filter and include-expression errors instead of silently broadening requests.
+- Supply the default document type for legacy Playbook Create.
+- Convert date-time inputs for calendar-date attributes while preserving the selected local date.
+- Retry explicit HTTP 429 rejections up to three times, honoring Retry-After values up to 120 seconds. Other failures are not replayed.
+
 ## 0.2.0 — 2026-09-07
 
 - Add Doc and Doc Folder operations using the current endpoints and JSON:API types.

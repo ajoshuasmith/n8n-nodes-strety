@@ -316,10 +316,13 @@ test('daily check-in sends an ISO calendar date and preserves a zero value', asy
 			value: 0,
 			additionalFields: { date: '2026-09-07' },
 		},
-		() => resource('metric_check_in'),
+		(options) =>
+			options.method === 'GET'
+				? resource('metric', { checkin_frequency: 'daily' })
+				: resource('metric_check_in'),
 	);
 	await run.execute();
-	assert.deepEqual(run.calls[0].body, {
+	assert.deepEqual(run.calls.at(-1).body, {
 		data: { type: 'metric_check_in', attributes: { value: 0, date: '2026-09-07' } },
 	});
 });
@@ -345,10 +348,13 @@ test('existing weekly check-in payload is unchanged', async () => {
 			value: 10,
 			additionalFields: { iso_week: 37, iso_week_year: 2026 },
 		},
-		() => resource('metric_check_in'),
+		(options) =>
+			options.method === 'GET'
+				? resource('metric', { checkin_frequency: 'weekly' })
+				: resource('metric_check_in'),
 	);
 	await run.execute();
-	assert.deepEqual(run.calls[0].body.data.attributes, {
+	assert.deepEqual(run.calls.at(-1).body.data.attributes, {
 		value: 10,
 		iso_week: 37,
 		iso_week_year: 2026,
@@ -577,3 +583,172 @@ test('archive resource pickers include archived records needed for Unarchive', a
 		assert.equal(run.calls.at(-1).qs['filter[archive_status]'], 'any');
 	}
 });
+
+for (const [frequency, fields] of Object.entries({
+	daily: { date: '2026-09-15' },
+	weekly: { iso_week: 38, iso_week_year: 2026 },
+	monthly: { month: 9, year: 2026 },
+	quarterly: { quarter: 3, year: 2026 },
+	annual: { year: 2026 },
+})) {
+	test(`${frequency} check-in validates parent frequency and accepts zero`, async () => {
+		const run = setup(
+			{
+				resource: 'metricCheckIn',
+				operation: 'create',
+				metricId: ID,
+				value: 0,
+				additionalFields: fields,
+			},
+			(options) =>
+				options.method === 'GET'
+					? resource('metric', { checkin_frequency: frequency })
+					: resource('metric_check_in'),
+		);
+		await run.execute();
+		assert.equal(run.calls[0].url, `https://2.strety.com/api/v1/metrics/${ID}`);
+		assert.deepEqual(run.calls[1].body.data.attributes, { value: 0, ...fields });
+	});
+	test(`${frequency} check-in rejects missing period without a POST`, async () => {
+		const run = setup(
+			{ resource: 'metricCheckIn', operation: 'create', metricId: ID, value: 1 },
+			() => resource('metric', { checkin_frequency: frequency }),
+		);
+		await assert.rejects(run.execute(), /require/);
+		assert.equal(run.calls.length, 1);
+		assert.equal(run.calls[0].method, 'GET');
+	});
+}
+for (const [frequency, fields] of [
+	['weekly', { iso_week: 0, iso_week_year: 2026 }],
+	['weekly', { iso_week: 53, iso_week_year: 2025 }],
+	['monthly', { month: 1.5, year: 2026 }],
+	['quarterly', { quarter: 5, year: 2026 }],
+	['annual', { year: 0 }],
+]) {
+	test(`reject invalid ${frequency} period ${JSON.stringify(fields)}`, async () => {
+		const run = setup(
+			{
+				resource: 'metricCheckIn',
+				operation: 'create',
+				metricId: ID,
+				value: 1,
+				additionalFields: fields,
+			},
+			() => resource('metric', { checkin_frequency: frequency }),
+		);
+		await assert.rejects(run.execute(), /require|52 weeks/);
+		assert.equal(run.calls.length, 1);
+	});
+}
+for (const operation of ['get', 'getAll'])
+	test(`metric ${operation} preserves included check-in values`, async () => {
+		const metric = resource('metric').data;
+		metric.relationships = { latest_check_ins: { data: [{ type: 'metric_check_in', id: VALUE }] } };
+		const run = setup(
+			{
+				resource: 'metric',
+				operation,
+				metricId: ID,
+				returnAll: false,
+				limit: 1,
+				options: { include: true },
+			},
+			() => ({
+				data: operation === 'get' ? metric : [metric],
+				included: [resource('metric_check_in', { value: 123.45, context: 'Context' }, VALUE).data],
+			}),
+		);
+		const [[item]] = await run.execute();
+		assert.equal(item.json.included[0].value, 123.45);
+		assert.equal(item.json.included[0].context, 'Context');
+		assert.deepEqual(item.json.latest_check_ins_ids, [VALUE]);
+	});
+for (const resourceName of ['metric', 'todo'])
+	test(`${resourceName} filter expression failures stop before request`, async () => {
+		const run = setup({ resource: resourceName, operation: 'getAll', returnAll: false, limit: 1 });
+		const original = run.context.getNodeParameter;
+		run.context.getNodeParameter = (name, ...args) => {
+			if (name === 'filters') throw Error('Invalid filter expression');
+			return original(name, ...args);
+		};
+		await assert.rejects(run.execute(), /Invalid filter expression/);
+		assert.equal(run.calls.length, 0);
+	});
+test('legacy playbook create supplies document type when optional fields are omitted', async () => {
+	const run = setup({
+		resource: 'playbook',
+		operation: 'create',
+		title: 'Test',
+		spaceId: SPACE,
+		spaceType: 'team',
+	});
+	await run.execute();
+	assert.equal(run.calls[0].body.data.attributes.type, 'document');
+});
+test('date-only fields preserve selected day across timezone offsets', async () => {
+	const run = setup({
+		resource: 'todo',
+		operation: 'create',
+		title: 'Test',
+		spaceId: SPACE,
+		spaceType: 'team',
+		additionalFields: { due_date: '2026-09-15T23:00:00-05:00' },
+	});
+	await run.execute();
+	assert.equal(run.calls[0].body.data.attributes.due_date, '2026-09-15');
+});
+test('explicit 429 retries the rejected request with the same payload', async () => {
+	const run = setup(
+		{ resource: 'metric', operation: 'create', title: 'Test', spaceId: SPACE, spaceType: 'team' },
+		(options, n) => {
+			if (n === 1)
+				throw Object.assign(Error('Too many requests'), {
+					response: { status: 429, headers: { 'retry-after': '0' } },
+				});
+			return resource('metric');
+		},
+	);
+	await run.execute();
+	assert.equal(run.calls.length, 2);
+	assert.deepEqual(run.calls[0], run.calls[1]);
+});
+test('persistent 429 stops after three retries', async () => {
+	const run = setup({ resource: 'metric', operation: 'get', metricId: ID }, () => {
+		throw Object.assign(Error('Too many requests'), {
+			response: { status: 429, headers: { 'retry-after': '0' } },
+		});
+	});
+	await assert.rejects(run.execute(), /Too many requests/);
+	assert.equal(run.calls.length, 4);
+});
+for (const status of [500, 412])
+	test(`${status} is not retried`, async () => {
+		const run = setup(
+			{ resource: 'metric', operation: 'create', title: 'Test', spaceId: SPACE, spaceType: 'team' },
+			() => {
+				throw Object.assign(Error('Rejected'), { response: { status } });
+			},
+		);
+		await assert.rejects(run.execute(), /Rejected/);
+		assert.equal(run.calls.length, 1);
+	});
+
+for (const retryAfter of ['Tue, 15 Sep 2020 18:00:00 GMT', 'not-a-date']) {
+	test(`Retry-After HTTP date parsing: ${retryAfter}`, async () => {
+		const run = setup({ resource: 'metric', operation: 'get', metricId: ID }, (options, n) => {
+			if (n === 1)
+				throw Object.assign(Error('Too many requests'), {
+					response: { status: 429, headers: { 'retry-after': retryAfter } },
+				});
+			return resource('metric');
+		});
+		if (retryAfter === 'not-a-date') {
+			await assert.rejects(run.execute(), /Too many requests/);
+			assert.equal(run.calls.length, 1);
+		} else {
+			await run.execute();
+			assert.equal(run.calls.length, 2);
+		}
+	});
+}

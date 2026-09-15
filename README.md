@@ -270,3 +270,11 @@ The wrapper's own dependencies must be installed alongside it. Set `STRETY_PACKA
 ## License
 
 [MIT](LICENSE)
+
+### Check-in periods (0.2.1)
+
+Metric Check-In Create reads the parent metric to validate its frequency before writing. In Additional Fields, provide Date (`YYYY-MM-DD`) for daily metrics; ISO Week and ISO Week Year for weekly metrics; Month and Year for monthly metrics; Quarter and Year for quarterly metrics; or Year for annual metrics. Historical periods and zero values are supported. Missing or invalid periods produce an actionable error without creating a check-in.
+
+When Include Check-Ins is enabled, Get/Get Many retain the API's included resources as flattened records in `included`, alongside the existing relationship IDs. For lists, each item carries its response page's included records; match records by both `type` and `id`.
+
+The local request limiter is process-scoped. Explicit HTTP 429 rejections receive up to three retries using Retry-After (maximum 120 seconds per retry); other errors are not automatically retried by the node.

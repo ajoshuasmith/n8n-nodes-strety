@@ -272,6 +272,119 @@ export class Strety implements INodeType {
 
 // ─── API Helpers ──────────────────────────────────────────────────────────────
 
+async function requestWithRateLimit(
+	this: IExecuteFunctions | ILoadOptionsFunctions,
+	options: IHttpRequestOptions,
+): Promise<unknown> {
+	for (let attempt = 0; ; attempt++) {
+		await enforceRateLimit();
+		try {
+			return await this.helpers.httpRequestWithAuthentication.call(
+				this,
+				'stretyOAuth2Api',
+				options,
+			);
+		} catch (error) {
+			const failure = error as {
+				cause?: { response?: { headers?: Record<string, string> } };
+				statusCode?: number;
+				httpCode?: string;
+				response?: { status?: number; statusCode?: number; headers?: Record<string, string> };
+			};
+			const status = Number(
+				failure.statusCode ??
+					failure.httpCode ??
+					failure.response?.status ??
+					failure.response?.statusCode,
+			);
+			// Only explicit rate-limit rejections are safe to replay for creates.
+			if (status !== 429 || attempt >= 3) throw error;
+			const retryAfter = (failure.response?.headers ?? failure.cause?.response?.headers)?.[
+				'retry-after'
+			];
+			const seconds =
+				retryAfter === undefined
+					? 10
+					: /^\d+(?:\.\d+)?$/.test(retryAfter.trim())
+						? Number(retryAfter)
+						: Math.max(0, (Date.parse(retryAfter) - Date.now()) / 1000);
+			if (!Number.isFinite(seconds) || seconds < 0 || seconds > 120) throw error;
+			await sleep(seconds * 1000);
+		}
+	}
+}
+
+function normalizeCalendarDates(this: IExecuteFunctions, attributes: IDataObject): void {
+	for (const key of ['due_date', 'start_date', 'end_date']) {
+		const value = attributes[key];
+		if (value === undefined || value === null || value === '') continue;
+		// Preserve the selected calendar day, including the input's timezone offset.
+		const date =
+			typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) ? value.slice(0, 10) : value;
+		validateDailyDate.call(this, date);
+		attributes[key] = date;
+	}
+}
+
+async function validateMetricPeriod(
+	this: IExecuteFunctions,
+	metricId: string,
+	value: number,
+	fields: IDataObject,
+): Promise<void> {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		throw new NodeOperationError(this.getNode(), 'Check-in Value must be a finite number');
+	}
+	const metric = await stretyApiRequest.call(this, 'GET', `/api/v1/metrics/${metricId}`);
+	const frequency = ((metric.data as IDataObject)?.attributes as IDataObject)?.checkin_frequency;
+	const required: Record<string, string[]> = {
+		daily: ['date'],
+		weekly: ['iso_week', 'iso_week_year'],
+		monthly: ['month', 'year'],
+		quarterly: ['quarter', 'year'],
+		annual: ['year'],
+	};
+	if (typeof frequency !== 'string' || !required[frequency]) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Could not determine the metric check-in frequency',
+		);
+	}
+	for (const key of required[frequency]) {
+		const field = fields[key];
+		if (key === 'date') {
+			if (field === undefined)
+				throw new NodeOperationError(
+					this.getNode(),
+					'Daily check-ins require Date in Additional Fields',
+				);
+			validateDailyDate.call(this, field);
+		} else {
+			const maximum = key === 'month' ? 12 : key === 'quarter' ? 4 : key === 'iso_week' ? 53 : 9999;
+			const minimum = key.includes('year') ? 1000 : 1;
+			if (
+				typeof field !== 'number' ||
+				!Number.isInteger(field) ||
+				field < minimum ||
+				field > maximum
+			) {
+				throw new NodeOperationError(
+					this.getNode(),
+					`${frequency} check-ins require ${key} as an integer from ${minimum} to ${maximum} in Additional Fields`,
+				);
+			}
+		}
+	}
+	if (frequency === 'weekly' && fields.iso_week === 53) {
+		const year = fields.iso_week_year as number;
+		const jan1 = new Date(`${year}-01-01T00:00:00Z`).getUTCDay();
+		const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+		if (jan1 !== 4 && !(jan1 === 3 && leap)) {
+			throw new NodeOperationError(this.getNode(), `ISO year ${year} has only 52 weeks`);
+		}
+	}
+}
+
 async function stretyApiRequest(
 	this: IExecuteFunctions | ILoadOptionsFunctions,
 	method: IHttpRequestMethods,
@@ -280,8 +393,6 @@ async function stretyApiRequest(
 	qs?: IDataObject,
 	extraHeaders?: IDataObject,
 ): Promise<IDataObject> {
-	await enforceRateLimit();
-
 	const options: IHttpRequestOptions = {
 		method,
 		url: `${BASE_URL}${docsEndpoint(endpoint)}`,
@@ -301,11 +412,7 @@ async function stretyApiRequest(
 		delete options.body;
 	}
 
-	const response = (await this.helpers.httpRequestWithAuthentication.call(
-		this,
-		'stretyOAuth2Api',
-		options,
-	)) as IDataObject;
+	const response = (await requestWithRateLimit.call(this, options)) as IDataObject;
 	return response && endpoint.startsWith('/api/v1/playbooks')
 		? legacyDocResponse(response)
 		: response;
@@ -331,7 +438,7 @@ async function stretyApiRequestAllItems(
 
 		if (!data || data.length === 0) break;
 
-		allItems.push(...data);
+		allItems.push(...data.map((item) => ({ ...item, included: response.included })));
 
 		if (limit && allItems.length >= limit) {
 			return allItems.slice(0, limit);
@@ -353,6 +460,9 @@ async function stretyApiRequestAllItems(
 
 function flattenJsonApiResource(resource: IDataObject): IDataObject {
 	const result: IDataObject = { id: resource.id, type: resource.type };
+	if (Array.isArray(resource.included)) {
+		result.included = (resource.included as IDataObject[]).map(flattenJsonApiResource);
+	}
 
 	const attributes = resource.attributes as IDataObject | undefined;
 	if (attributes) {
@@ -383,7 +493,7 @@ function flattenList(items: IDataObject[]): IDataObject[] {
 }
 
 function flattenSingle(response: IDataObject): IDataObject {
-	return flattenJsonApiResource(response.data as IDataObject);
+	return flattenJsonApiResource({ ...(response.data as IDataObject), included: response.included });
 }
 
 function buildJsonApiBody(type: string, attributes: IDataObject): IDataObject {
@@ -398,8 +508,6 @@ function buildJsonApiBody(type: string, attributes: IDataObject): IDataObject {
 // ─── CRUD Helpers ─────────────────────────────────────────────────────────────
 
 async function getEtag(this: IExecuteFunctions, endpoint: string): Promise<string> {
-	await enforceRateLimit();
-
 	const options: IHttpRequestOptions = {
 		method: 'GET',
 		url: `${BASE_URL}${docsEndpoint(endpoint)}`,
@@ -410,11 +518,7 @@ async function getEtag(this: IExecuteFunctions, endpoint: string): Promise<strin
 		returnFullResponse: true,
 	};
 
-	const response = (await this.helpers.httpRequestWithAuthentication.call(
-		this,
-		'stretyOAuth2Api',
-		options,
-	)) as IDataObject;
+	const response = (await requestWithRateLimit.call(this, options)) as IDataObject;
 
 	const headers = response.headers as IDataObject;
 	const etag = headers?.etag as string;
@@ -448,16 +552,10 @@ function addFiltersToQs(qs: IDataObject, filters: IDataObject): void {
 }
 
 function addIncludeOptions(ctx: IExecuteFunctions, qs: IDataObject, i: number): void {
-	try {
-		const options = ctx.getNodeParameter('options', i, {}) as IDataObject;
-		if (options.include) {
-			qs['include'] = 'latest_check_ins';
-			if (options.limit_check_ins) {
-				qs['limit_check_ins'] = options.limit_check_ins;
-			}
-		}
-	} catch {
-		// Parameter not available for this resource configuration
+	const options = ctx.getNodeParameter('options', i, {}) as IDataObject;
+	if (options.include) {
+		qs['include'] = 'latest_check_ins';
+		if (options.limit_check_ins) qs['limit_check_ins'] = options.limit_check_ins;
 	}
 }
 
@@ -470,12 +568,8 @@ async function handleGetAll(
 	const returnAll = this.getNodeParameter('returnAll', i) as boolean;
 	const qs: IDataObject = {};
 
-	try {
-		const filters = this.getNodeParameter(filtersParam, i, {}) as IDataObject;
-		addFiltersToQs(qs, filters);
-	} catch {
-		// No filters parameter defined for this resource
-	}
+	const filters = this.getNodeParameter(filtersParam, i, {}) as IDataObject;
+	addFiltersToQs(qs, filters);
 
 	let items: IDataObject[];
 	if (returnAll) {
@@ -500,12 +594,8 @@ async function handleGetAllWithIncludes(
 	const returnAll = this.getNodeParameter('returnAll', i) as boolean;
 	const qs: IDataObject = {};
 
-	try {
-		const filters = this.getNodeParameter('filters', i, {}) as IDataObject;
-		addFiltersToQs(qs, filters);
-	} catch {
-		// No filters parameter defined for this resource
-	}
+	const filters = this.getNodeParameter('filters', i, {}) as IDataObject;
+	addFiltersToQs(qs, filters);
 
 	addIncludeOptions(this, qs, i);
 
@@ -546,6 +636,7 @@ async function handleCreate(
 	type: string,
 	attributes: IDataObject,
 ): Promise<IDataObject> {
+	normalizeCalendarDates.call(this, attributes);
 	const body = buildJsonApiBody(type, attributes);
 	const response = await stretyApiRequest.call(this, 'POST', endpoint, body);
 	return flattenSingle(response);
@@ -558,6 +649,7 @@ async function handleUpdate(
 	attributes: IDataObject,
 ): Promise<IDataObject> {
 	const etag = await getEtag.call(this, endpoint);
+	normalizeCalendarDates.call(this, attributes);
 	const body = buildJsonApiBody(type, attributes);
 	const response = await stretyApiRequest.call(this, 'PATCH', endpoint, body, undefined, {
 		'If-Match': etag,
@@ -975,6 +1067,7 @@ async function handleMetricCheckIn(
 		const value = this.getNodeParameter('value', i) as number;
 		const additionalFields = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
 		validateDailyDate.call(this, additionalFields.date);
+		await validateMetricPeriod.call(this, metricId, value, additionalFields);
 		const attributes: IDataObject = { value, ...additionalFields };
 		return handleCreate.call(
 			this,
@@ -1067,6 +1160,7 @@ async function handlePlaybook(
 			space_type: spaceType,
 			...additionalFields,
 		};
+		attributes.type ??= 'document';
 		composeRenewalScheduler(attributes);
 		return handleCreate.call(this, '/api/v1/playbooks', 'playbook', attributes);
 	}
